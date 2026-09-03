@@ -1,0 +1,40 @@
+{
+  "news": [
+    {
+      "id": "noticia-inicial",
+      "title": "Bem-vindo ao Portal Católico da Fé",
+      "date": "2026-09-03T00:00:00.000Z",
+      "text": "Este espaco foi criado para publicar noticias, fotos, videos e aprendizados sobre o catolicismo.",
+      "category": "Comunidade"
+    },
+    {
+      "id": "santo-do-dia",
+      "title": "Ideia de publicacao: santo do dia",
+      "date": "2026-09-03T00:00:00.000Z",
+      "text": "Seu filho pode usar este espaco para escrever sobre santos, oracoes, evangelho do dia e atividades da paroquia.",
+      "category": "Catequese"
+    }
+  ],
+  "photos": [
+    {
+      "id": "foto-inicial",
+      "title": "Momento de fe",
+      "url": "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=1200&q=80",
+      "caption": "Adicione fotos por link no painel administrativo."
+    }
+  ],
+  "videos": [
+    {
+      "id": "video-inicial",
+      "title": "Video de exemplo",
+      "url": "https://www.youtube.com/embed/RQ2bS94b9g0",
+      "description": "Cole um link do YouTube no painel para publicar novos videos."
+    }
+  ],
+  "info": {
+    "title": "Portal Católico da Fé",
+    "subtitle": "Noticias, fotos, videos e informacoes sobre o catolicismo",
+    "about": "Um cantinho simples para registrar a fe catolica, aprender sobre santos, oracoes, liturgia e momentos importantes da comunidade.",
+    "prayer": "Senhor, guiai nossos passos no amor, na verdade e na caridade."
+  }
+}
