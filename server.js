@@ -95,6 +95,13 @@ function normalizeYouTubeUrl(url = '') {
   return trimmed;
 }
 
+function parseImageUrls(value = '') {
+  return String(value)
+    .split(/\r?\n|,/)
+    .map((url) => url.trim())
+    .filter(Boolean);
+}
+
 function signedValue(value) {
   const signature = crypto
     .createHmac('sha256', COOKIE_SECRET)
@@ -167,6 +174,13 @@ function renderHome(data) {
         <h3>${escapeHtml(item.title)}</h3>
         <time>${new Date(item.date).toLocaleDateString('pt-BR')}</time>
         <p>${escapeHtml(item.text)}</p>
+        ${(item.images || []).length ? `
+          <div class="news-images">
+            ${(item.images || []).map((url, index) => `
+              <img src="${escapeHtml(url)}" alt="${escapeHtml(item.title)} - foto ${index + 1}" loading="lazy">
+            `).join('')}
+          </div>
+        ` : ''}
       </article>
     `)
     .join('');
@@ -293,6 +307,7 @@ function renderAdmin(data) {
             ${formField({ label: 'Titulo', name: 'title' })}
             ${formField({ label: 'Categoria', name: 'category', value: 'Catequese' })}
             ${formField({ label: 'Texto', name: 'text', textarea: true })}
+            ${formField({ label: 'Links das fotos (um por linha)', name: 'images', textarea: true, required: false })}
             <button class="primary-button" type="submit">Publicar</button>
           </form>
 
@@ -385,6 +400,7 @@ app.post('/admin/news', requireAuth, async (req, res) => {
     title: req.body.title?.trim(),
     category: req.body.category?.trim() || 'Noticia',
     text: req.body.text?.trim(),
+    images: parseImageUrls(req.body.images),
     date: new Date().toISOString()
   });
   await writeData(data);
