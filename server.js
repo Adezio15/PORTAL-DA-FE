@@ -10,13 +10,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'content.json');
+const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'portal123';
 const COOKIE_SECRET = process.env.COOKIE_SECRET || 'troque-este-segredo-no-render';
 const SITE_NAME = 'Portal Católico da Fé';
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+app.use(express.json({ limit: '12mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 async function ensureDataFile() {
@@ -72,6 +73,37 @@ async function writeData(data) {
   await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
+async function saveUploadedImage(dataUrl = '') {
+  if (!dataUrl) return '';
+
+  const match = String(dataUrl).match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([a-zA-Z0-9+/=]+)$/);
+  if (!match) throw new Error('Formato de imagem invalido.');
+
+  const image = Buffer.from(match[2], 'base64');
+  if (!image.length || image.length > 5 * 1024 * 1024) {
+    throw new Error('A imagem deve ter no maximo 5 MB.');
+  }
+
+  const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+  const filename = `${crypto.randomUUID()}.${extensions[match[1]]}`;
+  await fs.mkdir(UPLOADS_DIR, { recursive: true });
+  await fs.writeFile(path.join(UPLOADS_DIR, filename), image);
+  return `/uploads/${filename}`;
+}
+
+async function removeUploadedImages(images = []) {
+  await Promise.all(images
+    .filter((url) => typeof url === 'string' && url.startsWith('/uploads/'))
+    .map(async (url) => {
+      const filename = path.basename(url);
+      try {
+        await fs.unlink(path.join(UPLOADS_DIR, filename));
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }));
+}
+
 function escapeHtml(value = '') {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -93,13 +125,6 @@ function normalizeYouTubeUrl(url = '') {
   if (shortMatch?.[1]) return `https://www.youtube.com/embed/${shortMatch[1]}`;
 
   return trimmed;
-}
-
-function parseImageUrls(value = '') {
-  return String(value)
-    .split(/\r?\n|,/)
-    .map((url) => normalizeImageUrl(url))
-    .filter(Boolean);
 }
 
 function normalizeImageUrl(value = '') {
@@ -197,6 +222,7 @@ function layout({ title, body, admin = false }) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Literata:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
+  ${admin ? '<script src="/admin.js" defer></script>' : ''}
 </head>
 <body>
   <header class="topbar">
@@ -312,12 +338,13 @@ function renderHome(data) {
   });
 }
 
-function formField({ label, name, type = 'text', value = '', textarea = false, required = true }) {
+function formField({ label, name, type = 'text', value = '', textarea = false, required = true, accept = '' }) {
   const requiredAttr = required ? 'required' : '';
   if (textarea) {
     return `<label>${label}<textarea name="${name}" ${requiredAttr}>${escapeHtml(value)}</textarea></label>`;
   }
-  return `<label>${label}<input type="${type}" name="${name}" value="${escapeHtml(value)}" ${requiredAttr}></label>`;
+  const acceptAttr = accept ? `accept="${escapeHtml(accept)}"` : '';
+  return `<label>${label}<input type="${type}" name="${name}" value="${escapeHtml(value)}" ${acceptAttr} ${requiredAttr}></label>`;
 }
 
 function renderAdmin(data) {
@@ -355,12 +382,28 @@ function renderAdmin(data) {
             <button class="primary-button" type="submit">Salvar</button>
           </form>
 
-          <form class="panel" method="post" action="/admin/news">
+          <form class="panel news-form" method="post" action="/admin/news">
             <h2>Nova noticia</h2>
+            <p class="form-intro">Escreva a noticia e escolha uma foto do celular ou computador.</p>
             ${formField({ label: 'Titulo', name: 'title' })}
             ${formField({ label: 'Categoria', name: 'category', value: 'Catequese' })}
-            ${formField({ label: 'Texto', name: 'text', textarea: true })}
-            ${formField({ label: 'Links diretos das fotos (um por linha)', name: 'images', textarea: true, required: false })}
+            ${formField({ label: 'Texto da noticia', name: 'text', textarea: true })}
+            <label class="photo-picker">
+              Foto da noticia <span class="optional">(opcional, ate 5 MB)</span>
+              <input id="news-image-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+              <span class="file-button">Escolher foto</span>
+              <span id="news-image-name" class="file-name">Nenhuma foto escolhida</span>
+            </label>
+            <div id="news-image-preview" class="image-preview" hidden>
+              <img alt="Pre-visualizacao da foto">
+              <button class="secondary-button" type="button" id="remove-news-image">Remover foto</button>
+            </div>
+            <input id="news-image-data" type="hidden" name="imageData">
+            <details class="link-option">
+              <summary>Usar link de imagem</summary>
+              ${formField({ label: 'Link direto da foto', name: 'imageUrl', type: 'url', required: false })}
+            </details>
+            <p id="news-form-error" class="form-error" role="alert" hidden></p>
             <button class="primary-button" type="submit">Publicar</button>
           </form>
 
@@ -461,17 +504,27 @@ app.post('/admin/info', requireAuth, async (req, res) => {
 });
 
 app.post('/admin/news', requireAuth, async (req, res) => {
-  const data = await readData();
-  data.news.push({
-    id: crypto.randomUUID(),
-    title: req.body.title?.trim(),
-    category: req.body.category?.trim() || 'Noticia',
-    text: req.body.text?.trim(),
-    images: parseImageUrls(req.body.images),
-    date: new Date().toISOString()
-  });
-  await writeData(data);
-  res.redirect('/admin');
+  try {
+    const data = await readData();
+    const uploadedImage = await saveUploadedImage(req.body.imageData);
+    const linkedImage = normalizeImageUrl(req.body.imageUrl);
+    data.news.push({
+      id: crypto.randomUUID(),
+      title: req.body.title?.trim(),
+      category: req.body.category?.trim() || 'Noticia',
+      text: req.body.text?.trim(),
+      images: [uploadedImage || linkedImage].filter(Boolean),
+      date: new Date().toISOString()
+    });
+    await writeData(data);
+    res.redirect('/admin');
+  } catch (error) {
+    res.status(400).send(layout({
+      title: `Erro - ${SITE_NAME}`,
+      admin: true,
+      body: `<main class="login-page"><section class="panel login-card"><h1>Nao foi possivel publicar</h1><p>${escapeHtml(error.message)}</p><a class="primary-button" href="/admin">Voltar ao painel</a></section></main>`
+    }));
+  }
 });
 
 app.post('/admin/photos', requireAuth, async (req, res) => {
@@ -502,6 +555,8 @@ app.post('/admin/delete', requireAuth, async (req, res) => {
   const data = await readData();
   const type = req.body.type;
   if (['news', 'photos', 'videos'].includes(type)) {
+    const removedItem = data[type].find((item) => item.id === req.body.id);
+    if (type === 'news' && removedItem) await removeUploadedImages(removedItem.images);
     data[type] = data[type].filter((item) => item.id !== req.body.id);
     await writeData(data);
   }
