@@ -3,13 +3,20 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import {
+  addNews,
+  addPhoto,
+  addVideo,
+  deleteContent,
+  initializeDatabase,
+  readData,
+  updateInfo
+} from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'content.json');
 const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'portal123';
@@ -19,59 +26,6 @@ const SITE_NAME = 'Portal Católico da Fé';
 app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 app.use(express.json({ limit: '12mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-
-async function ensureDataFile() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    await fs.access(DATA_FILE);
-  } catch {
-    const initialData = {
-      news: [
-        {
-          id: crypto.randomUUID(),
-          title: 'Bem-vindo ao Portal Católico da Fé',
-          date: new Date().toISOString(),
-          text: 'Este espaco foi criado para publicar noticias, fotos, videos e aprendizados sobre o catolicismo.',
-          category: 'Comunidade'
-        }
-      ],
-      photos: [
-        {
-          id: crypto.randomUUID(),
-          title: 'Nossa Senhora Aparecida',
-          url: 'https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=1200&q=80',
-          caption: 'Use imagens suas, da familia, da paroquia ou links publicos.'
-        }
-      ],
-      videos: [
-        {
-          id: crypto.randomUUID(),
-          title: 'Video de exemplo',
-          url: 'https://www.youtube.com/embed/RQ2bS94b9g0',
-          description: 'Cole links de incorporacao do YouTube para publicar videos.'
-        }
-      ],
-      info: {
-        title: SITE_NAME,
-        subtitle: 'Noticias, fotos, videos e informacoes sobre o catolicismo',
-        about: 'Um cantinho simples para registrar a fe catolica, aprender sobre santos, oracoes, liturgia e momentos importantes da comunidade.',
-        prayer: 'Senhor, guiai nossos passos no amor, na verdade e na caridade.'
-      }
-    };
-    await writeData(initialData);
-  }
-}
-
-async function readData() {
-  await ensureDataFile();
-  const raw = await fs.readFile(DATA_FILE, 'utf8');
-  return JSON.parse(raw);
-}
-
-async function writeData(data) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
-}
 
 async function saveUploadedImage(dataUrl = '') {
   if (!dataUrl) return '';
@@ -493,22 +447,20 @@ app.get('/admin', requireAuth, async (req, res) => {
 
 app.post('/admin/info', requireAuth, async (req, res) => {
   const data = await readData();
-  data.info = {
+  await updateInfo({
     title: req.body.title?.trim() || data.info.title,
     subtitle: req.body.subtitle?.trim() || data.info.subtitle,
     about: req.body.about?.trim() || data.info.about,
     prayer: req.body.prayer?.trim() || data.info.prayer
-  };
-  await writeData(data);
+  });
   res.redirect('/admin');
 });
 
 app.post('/admin/news', requireAuth, async (req, res) => {
   try {
-    const data = await readData();
     const uploadedImage = await saveUploadedImage(req.body.imageData);
     const linkedImage = normalizeImageUrl(req.body.imageUrl);
-    data.news.push({
+    await addNews({
       id: crypto.randomUUID(),
       title: req.body.title?.trim(),
       category: req.body.category?.trim() || 'Noticia',
@@ -516,7 +468,6 @@ app.post('/admin/news', requireAuth, async (req, res) => {
       images: [uploadedImage || linkedImage].filter(Boolean),
       date: new Date().toISOString()
     });
-    await writeData(data);
     res.redirect('/admin');
   } catch (error) {
     res.status(400).send(layout({
@@ -528,26 +479,22 @@ app.post('/admin/news', requireAuth, async (req, res) => {
 });
 
 app.post('/admin/photos', requireAuth, async (req, res) => {
-  const data = await readData();
-  data.photos.push({
+  await addPhoto({
     id: crypto.randomUUID(),
     title: req.body.title?.trim(),
     url: normalizeImageUrl(req.body.url),
     caption: req.body.caption?.trim()
   });
-  await writeData(data);
   res.redirect('/admin');
 });
 
 app.post('/admin/videos', requireAuth, async (req, res) => {
-  const data = await readData();
-  data.videos.push({
+  await addVideo({
     id: crypto.randomUUID(),
     title: req.body.title?.trim(),
     url: normalizeYouTubeUrl(req.body.url),
     description: req.body.description?.trim()
   });
-  await writeData(data);
   res.redirect('/admin');
 });
 
@@ -557,12 +504,16 @@ app.post('/admin/delete', requireAuth, async (req, res) => {
   if (['news', 'photos', 'videos'].includes(type)) {
     const removedItem = data[type].find((item) => item.id === req.body.id);
     if (type === 'news' && removedItem) await removeUploadedImages(removedItem.images);
-    data[type] = data[type].filter((item) => item.id !== req.body.id);
-    await writeData(data);
+    await deleteContent(type, req.body.id);
   }
   res.redirect('/admin');
 });
 
-app.listen(PORT, () => {
-  console.log(`${SITE_NAME} rodando em http://localhost:${PORT}`);
-});
+initializeDatabase()
+  .then(() => app.listen(PORT, () => {
+    console.log(`${SITE_NAME} rodando em http://localhost:${PORT}`);
+  }))
+  .catch((error) => {
+    console.error('Nao foi possivel inicializar o banco de dados:', error.message);
+    process.exit(1);
+  });
