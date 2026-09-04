@@ -25,7 +25,7 @@ No Render, configure as variaveis de ambiente:
 - `ADMIN_USER`: usuario do painel
 - `COOKIE_SECRET`: texto secreto grande para proteger o login
 
-Ao criar uma noticia, informe os links das fotos no campo "Links das fotos", com um link por linha. O campo e opcional e aceita uma ou varias imagens.
+Ao criar uma noticia, informe os links das fotos no campo "Links das fotos", com um link por linha. O campo e opcional e aceita uma ou varias imagens. Links publicos do Google Drive, Google Fotos e Google Images tambem podem ser usados; o arquivo precisa estar liberado para qualquer pessoa com o link.
 
 ## Deploy no Render
 

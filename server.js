@@ -126,6 +126,35 @@ function normalizeImageUrl(value = '') {
   }
 }
 
+function isGoogleUrl(value = '') {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === 'google.com' || hostname.endsWith('.google.com') || hostname.endsWith('.googleusercontent.com') || hostname === 'goo.gl' || hostname.endsWith('.goo.gl');
+  } catch {
+    return false;
+  }
+}
+
+function imageDisplayUrl(value = '') {
+  return isGoogleUrl(value) ? `/image-proxy?url=${encodeURIComponent(value)}` : value;
+}
+
+async function fetchGoogleImage(url, allowHtml = true) {
+  const response = await fetch(url, { headers: { Accept: 'image/*, text/html;q=0.9' }, redirect: 'follow' });
+  const contentType = response.headers.get('content-type') || '';
+  const body = Buffer.from(await response.arrayBuffer());
+
+  if (contentType.startsWith('image/')) return { body, contentType };
+  if (!allowHtml || !contentType.includes('text/html')) return null;
+
+  const html = body.toString('utf8');
+  const imageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (!imageMatch?.[1]) return null;
+
+  return fetchGoogleImage(new URL(imageMatch[1], response.url).toString(), false);
+}
+
 function signedValue(value) {
   const signature = crypto
     .createHmac('sha256', COOKIE_SECRET)
@@ -201,7 +230,7 @@ function renderHome(data) {
         ${(item.images || []).length ? `
           <div class="news-images">
             ${(item.images || []).map((url, index) => `
-              <img src="${escapeHtml(url)}" alt="${escapeHtml(item.title)} - foto ${index + 1}" loading="lazy" referrerpolicy="no-referrer">
+              <img src="${escapeHtml(imageDisplayUrl(url))}" alt="${escapeHtml(item.title)} - foto ${index + 1}" loading="lazy" referrerpolicy="no-referrer">
             `).join('')}
           </div>
         ` : ''}
@@ -212,7 +241,7 @@ function renderHome(data) {
   const photos = data.photos
     .map((item) => `
       <figure class="photo-card">
-        <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">
+        <img src="${escapeHtml(imageDisplayUrl(item.url))}" alt="${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">
         <figcaption>
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.caption)}</span>
@@ -369,6 +398,20 @@ function renderAdmin(data) {
 app.get('/', async (req, res) => {
   const data = await readData();
   res.send(renderHome(data));
+});
+
+app.get('/image-proxy', async (req, res) => {
+  const sourceUrl = normalizeImageUrl(req.query.url);
+  if (!sourceUrl || !isGoogleUrl(sourceUrl)) return res.sendStatus(400);
+
+  try {
+    const image = await fetchGoogleImage(sourceUrl);
+    if (!image) return res.sendStatus(404);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.type(image.contentType).send(image.body);
+  } catch {
+    res.sendStatus(502);
+  }
 });
 
 app.get('/login', (req, res) => {
