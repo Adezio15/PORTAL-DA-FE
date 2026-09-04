@@ -98,8 +98,32 @@ function normalizeYouTubeUrl(url = '') {
 function parseImageUrls(value = '') {
   return String(value)
     .split(/\r?\n|,/)
-    .map((url) => url.trim())
+    .map((url) => normalizeImageUrl(url))
     .filter(Boolean);
+}
+
+function normalizeImageUrl(value = '') {
+  const trimmed = String(value).trim();
+  if (!trimmed) return '';
+
+  try {
+    const url = new URL(trimmed);
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+
+    const driveMatch = url.pathname.match(/^\/file\/d\/([^/]+)/);
+    if (url.hostname === 'drive.google.com' && driveMatch?.[1]) {
+      return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(driveMatch[1])}`;
+    }
+
+    if (url.hostname === 'dropbox.com' || url.hostname === 'www.dropbox.com') {
+      url.searchParams.set('raw', '1');
+      return url.toString();
+    }
+
+    return url.toString();
+  } catch {
+    return '';
+  }
 }
 
 function signedValue(value) {
@@ -177,7 +201,7 @@ function renderHome(data) {
         ${(item.images || []).length ? `
           <div class="news-images">
             ${(item.images || []).map((url, index) => `
-              <img src="${escapeHtml(url)}" alt="${escapeHtml(item.title)} - foto ${index + 1}" loading="lazy">
+              <img src="${escapeHtml(url)}" alt="${escapeHtml(item.title)} - foto ${index + 1}" loading="lazy" referrerpolicy="no-referrer">
             `).join('')}
           </div>
         ` : ''}
@@ -188,7 +212,7 @@ function renderHome(data) {
   const photos = data.photos
     .map((item) => `
       <figure class="photo-card">
-        <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.title)}" loading="lazy">
+        <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">
         <figcaption>
           <strong>${escapeHtml(item.title)}</strong>
           <span>${escapeHtml(item.caption)}</span>
@@ -307,14 +331,14 @@ function renderAdmin(data) {
             ${formField({ label: 'Titulo', name: 'title' })}
             ${formField({ label: 'Categoria', name: 'category', value: 'Catequese' })}
             ${formField({ label: 'Texto', name: 'text', textarea: true })}
-            ${formField({ label: 'Links das fotos (um por linha)', name: 'images', textarea: true, required: false })}
+            ${formField({ label: 'Links diretos das fotos (um por linha)', name: 'images', textarea: true, required: false })}
             <button class="primary-button" type="submit">Publicar</button>
           </form>
 
           <form class="panel" method="post" action="/admin/photos">
             <h2>Nova foto</h2>
             ${formField({ label: 'Titulo', name: 'title' })}
-            ${formField({ label: 'Link da imagem', name: 'url', type: 'url' })}
+            ${formField({ label: 'Link direto da imagem', name: 'url', type: 'url' })}
             ${formField({ label: 'Legenda', name: 'caption', textarea: true })}
             <button class="primary-button" type="submit">Adicionar foto</button>
           </form>
@@ -412,7 +436,7 @@ app.post('/admin/photos', requireAuth, async (req, res) => {
   data.photos.push({
     id: crypto.randomUUID(),
     title: req.body.title?.trim(),
-    url: req.body.url?.trim(),
+    url: normalizeImageUrl(req.body.url),
     caption: req.body.caption?.trim()
   });
   await writeData(data);
