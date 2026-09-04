@@ -509,11 +509,31 @@ app.post('/admin/delete', requireAuth, async (req, res) => {
   res.redirect('/admin');
 });
 
+function safeDatabaseErrorMessage(error) {
+  let message = String(error?.message || 'Erro desconhecido');
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) return message;
+
+  message = message.replaceAll(connectionString, '[credenciais omitidas]');
+  try {
+    const connection = new URL(connectionString);
+    for (const secret of [connection.username, connection.password]) {
+      if (secret) message = message.replaceAll(secret, '[omitido]');
+    }
+  } catch {
+    // A mensagem original continuara sendo exibida, sem imprimir a variavel.
+  }
+  return message.replace(/postgres(?:ql)?:\/\/\S+/gi, '[credenciais omitidas]');
+}
+
 initializeDatabase()
-  .then(() => app.listen(PORT, () => {
-    console.log(`${SITE_NAME} rodando em http://localhost:${PORT}`);
-  }))
+  .then(() => {
+    console.log('✅ Banco Neon conectado com sucesso');
+    app.listen(PORT, () => {
+      console.log(`${SITE_NAME} rodando em http://localhost:${PORT}`);
+    });
+  })
   .catch((error) => {
-    console.error('Nao foi possivel inicializar o banco de dados:', error.message);
+    console.error('❌ Erro ao conectar ao banco:', safeDatabaseErrorMessage(error));
     process.exit(1);
   });
