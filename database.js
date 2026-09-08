@@ -116,3 +116,12 @@ export async function deleteContent(type, id) {
   if (type === 'photos') return db`DELETE FROM photos WHERE id = ${id}`;
   if (type === 'videos') return db`DELETE FROM videos WHERE id = ${id}`;
 }
+
+export async function updateNews(item) {
+  const db = database();
+  await db.transaction([
+    db`UPDATE news SET title = ${item.title}, category = ${item.category}, body = ${item.text} WHERE id = ${item.id}`,
+    db`DELETE FROM news_images WHERE news_id = ${item.id}`,
+    ...item.images.map((url, position) => db`INSERT INTO news_images (news_id, url, position) VALUES (${item.id}, ${url}, ${position})`)
+  ]);
+}

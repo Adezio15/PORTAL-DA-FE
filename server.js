@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { saveUploadedImage, removeCloudinaryImage } from './cloudinary.js';
 import {
   addNews,
   addPhoto,
@@ -10,14 +10,14 @@ import {
   deleteContent,
   initializeDatabase,
   readData,
-  updateInfo
+  updateInfo,
+  updateNews
 } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
-const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'portal123';
 const COOKIE_SECRET = process.env.COOKIE_SECRET || 'troque-este-segredo-no-render';
@@ -27,35 +27,16 @@ app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 app.use(express.json({ limit: '12mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-async function saveUploadedImage(dataUrl = '') {
-  if (!dataUrl) return '';
-
-  const match = String(dataUrl).match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([a-zA-Z0-9+/=]+)$/);
-  if (!match) throw new Error('Formato de imagem invalido.');
-
-  const image = Buffer.from(match[2], 'base64');
-  if (!image.length || image.length > 5 * 1024 * 1024) {
-    throw new Error('A imagem deve ter no maximo 5 MB.');
+async function removeUnusedImages(images = []) {
+  const data = await readData();
+  const used = new Set([...data.news.flatMap(item => item.images), ...data.photos.map(item => item.url)]);
+  let failed = false;
+  for (const url of new Set(images)) {
+    if (used.has(url)) continue;
+    try { await removeCloudinaryImage(url); }
+    catch { failed = true; console.error('Falha ao limpar imagem no Cloudinary; verificar arquivos sem uso na pasta portal-da-fe/news.'); }
   }
-
-  const extensions = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
-  const filename = `${crypto.randomUUID()}.${extensions[match[1]]}`;
-  await fs.mkdir(UPLOADS_DIR, { recursive: true });
-  await fs.writeFile(path.join(UPLOADS_DIR, filename), image);
-  return `/uploads/${filename}`;
-}
-
-async function removeUploadedImages(images = []) {
-  await Promise.all(images
-    .filter((url) => typeof url === 'string' && url.startsWith('/uploads/'))
-    .map(async (url) => {
-      const filename = path.basename(url);
-      try {
-        await fs.unlink(path.join(UPLOADS_DIR, filename));
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-      }
-    }));
+  return failed;
 }
 
 function escapeHtml(value = '') {
@@ -301,10 +282,11 @@ function formField({ label, name, type = 'text', value = '', textarea = false, r
   return `<label>${label}<input type="${type}" name="${name}" value="${escapeHtml(value)}" ${acceptAttr} ${requiredAttr}></label>`;
 }
 
-function renderAdmin(data) {
+function renderAdmin(data, editing = null, warning = false) {
   const listItems = (items, type) => items.map((item) => `
     <li>
       <span>${escapeHtml(item.title)}</span>
+      ${type === 'news' ? `<a href="/admin?edit=${encodeURIComponent(item.id)}">Editar</a>` : ''}
       <form method="post" action="/admin/delete">
         <input type="hidden" name="type" value="${type}">
         <input type="hidden" name="id" value="${escapeHtml(item.id)}">
@@ -318,6 +300,7 @@ function renderAdmin(data) {
     admin: true,
     body: `
       <main class="admin-page">
+        ${warning ? '<p role="alert">Conteudo salvo. A exclusao de uma imagem no Cloudinary falhou; verifique os arquivos sem uso na pasta portal-da-fe/news.</p>' : ''}
         <section class="admin-header">
           <div>
             <p class="eyebrow">Painel do site</p>
@@ -337,11 +320,14 @@ function renderAdmin(data) {
           </form>
 
           <form class="panel news-form" method="post" action="/admin/news">
-            <h2>Nova noticia</h2>
+            <h2>${editing ? 'Editar noticia' : 'Nova noticia'}</h2>
+            <input type="hidden" name="id" value="${escapeHtml(editing?.id || '')}">
             <p class="form-intro">Escreva a noticia e escolha uma foto do celular ou computador.</p>
-            ${formField({ label: 'Titulo', name: 'title' })}
-            ${formField({ label: 'Categoria', name: 'category', value: 'Catequese' })}
-            ${formField({ label: 'Texto da noticia', name: 'text', textarea: true })}
+            ${formField({ label: 'Titulo', name: 'title', value: editing?.title || '' })}
+            ${formField({ label: 'Categoria', name: 'category', value: editing?.category || 'Catequese' })}
+            ${formField({ label: 'Texto da noticia', name: 'text', textarea: true, value: editing?.text || '' })}
+            ${(editing?.images || []).map((url, index) => `<label><img src="${escapeHtml(imageDisplayUrl(url))}" alt="Foto atual ${index + 1}" width="120"><span><input type="checkbox" name="removeImages" value="${index}"> Remover esta foto</span></label>`).join('')}
+            ${editing ? '<p class="form-intro">Uma nova foto substitui as fotos atuais. Sem selecionar uma nova foto, as fotos desmarcadas serao mantidas.</p>' : ''}
             <label class="photo-picker">
               Foto da noticia <span class="optional">(opcional, ate 5 MB)</span>
               <input id="news-image-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
@@ -358,7 +344,8 @@ function renderAdmin(data) {
               ${formField({ label: 'Link direto da foto', name: 'imageUrl', type: 'url', required: false })}
             </details>
             <p id="news-form-error" class="form-error" role="alert" hidden></p>
-            <button class="primary-button" type="submit">Publicar</button>
+            <button class="primary-button" type="submit">${editing ? 'Salvar alteracoes' : 'Publicar'}</button>
+            ${editing ? '<a href="/admin">Cancelar edicao</a>' : ''}
           </form>
 
           <form class="panel" method="post" action="/admin/photos">
@@ -442,7 +429,9 @@ app.get('/logout', (req, res) => {
 
 app.get('/admin', requireAuth, async (req, res) => {
   const data = await readData();
-  res.send(renderAdmin(data));
+  const editing = req.query.edit ? data.news.find(item => item.id === req.query.edit) : null;
+  if (req.query.edit && !editing) return res.sendStatus(404);
+  res.send(renderAdmin(data, editing, req.query.cleanup === 'pending'));
 });
 
 app.post('/admin/info', requireAuth, async (req, res) => {
@@ -457,23 +446,34 @@ app.post('/admin/info', requireAuth, async (req, res) => {
 });
 
 app.post('/admin/news', requireAuth, async (req, res) => {
+  let uploadedImage = '';
+  let saved = false;
   try {
-    const uploadedImage = await saveUploadedImage(req.body.imageData);
+    const data = await readData();
+    const existing = req.body.id ? data.news.find(item => item.id === req.body.id) : null;
+    if (req.body.id && !existing) return res.sendStatus(404);
+    const title = String(req.body.title || '').trim();
+    const text = String(req.body.text || '').trim();
+    if (!title || !text) throw new Error('Preencha o titulo e o texto da noticia.');
     const linkedImage = normalizeImageUrl(req.body.imageUrl);
-    await addNews({
-      id: crypto.randomUUID(),
-      title: req.body.title?.trim(),
-      category: req.body.category?.trim() || 'Noticia',
-      text: req.body.text?.trim(),
-      images: [uploadedImage || linkedImage].filter(Boolean),
-      date: new Date().toISOString()
-    });
-    res.redirect('/admin');
+    if (req.body.imageUrl && !linkedImage) throw new Error('Informe um link de imagem HTTP ou HTTPS valido.');
+    uploadedImage = await saveUploadedImage(req.body.imageData);
+    const removed = [].concat(req.body.removeImages || []).map(String);
+    const images = uploadedImage || linkedImage ? [uploadedImage || linkedImage] : (existing?.images || []).filter((url, index) => !removed.includes(String(index)));
+    const item = { id: existing?.id || crypto.randomUUID(), title, text,
+      category: String(req.body.category || '').trim() || 'Noticia', images };
+    if (existing) await updateNews(item);
+    else await addNews(item);
+    saved = true;
+    const pending = await removeUnusedImages(existing?.images || []);
+    res.redirect(pending ? '/admin?cleanup=pending' : '/admin');
   } catch (error) {
+    if (uploadedImage && !saved) {
+      try { await removeUnusedImages([uploadedImage]); } catch { console.error('Falha ao verificar imagem sem uso.'); }
+    }
     res.status(400).send(layout({
-      title: `Erro - ${SITE_NAME}`,
-      admin: true,
-      body: `<main class="login-page"><section class="panel login-card"><h1>Nao foi possivel publicar</h1><p>${escapeHtml(error.message)}</p><a class="primary-button" href="/admin">Voltar ao painel</a></section></main>`
+      title: `Erro - ${SITE_NAME}`, admin: true,
+      body: `<main class="login-page"><section class="panel login-card"><h1>${saved ? 'Noticia salva; falha na limpeza de imagens' : 'Nao foi possivel salvar'}</h1><p>${escapeHtml(error.message.includes('Cloudinary') || error.message.startsWith('Preencha') || error.message.startsWith('Informe') || error.message.startsWith('Formato') || error.message.startsWith('A imagem') || error.message.startsWith('Configure') ? error.message : 'Falha ao salvar no banco. Tente novamente.')}</p><a class="primary-button" href="/admin">Voltar ao painel</a></section></main>`
     }));
   }
 });
@@ -503,8 +503,9 @@ app.post('/admin/delete', requireAuth, async (req, res) => {
   const type = req.body.type;
   if (['news', 'photos', 'videos'].includes(type)) {
     const removedItem = data[type].find((item) => item.id === req.body.id);
-    if (type === 'news' && removedItem) await removeUploadedImages(removedItem.images);
     await deleteContent(type, req.body.id);
+    const images = type === 'news' ? removedItem?.images : type === 'photos' ? [removedItem?.url] : [];
+    if (await removeUnusedImages(images || [])) return res.redirect('/admin?cleanup=pending');
   }
   res.redirect('/admin');
 });

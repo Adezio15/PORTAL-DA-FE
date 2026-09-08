@@ -6,9 +6,11 @@ const previewImage = preview?.querySelector('img');
 const fileName = document.querySelector('#news-image-name');
 const removeButton = document.querySelector('#remove-news-image');
 const formError = document.querySelector('#news-form-error');
+let selectionVersion = 0;
 
 function clearImage() {
   if (!fileInput) return;
+  selectionVersion++;
   fileInput.value = '';
   imageData.value = '';
   previewImage.removeAttribute('src');
@@ -29,8 +31,17 @@ fileInput?.addEventListener('change', () => {
     return;
   }
 
+  const version = ++selectionVersion;
+  imageData.value = '';
   const reader = new FileReader();
+  reader.addEventListener('error', () => {
+    if (version !== selectionVersion) return;
+    clearImage();
+    formError.textContent = 'Nao foi possivel ler a foto. Escolha o arquivo novamente.';
+    formError.hidden = false;
+  });
   reader.addEventListener('load', () => {
+    if (version !== selectionVersion) return;
     imageData.value = reader.result;
     previewImage.src = reader.result;
     preview.hidden = false;
