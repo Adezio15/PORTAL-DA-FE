@@ -71,6 +71,18 @@ test('painel edita texto, preserva imagens antigas, substitui e exclui depois de
   assert.deepEqual(Array.from(data.news[0].images), ['https://example.com/a.jpg']);
   await routes.get('POST /admin/news')({ body: { id: 'old', title: 'Novo', text: 'Editado', imageData: 'image' } }, response);
   assert.equal(data.news[0].images[0], 'https://example.com/new.jpg');
+  const originalUpload = context.saveUploadedImage;
+  context.saveUploadedImage = async () => { throw new Error('Cloudinary indisponivel'); };
+  await routes.get('POST /admin/news')({ body: { id: 'old', title: 'Novo', text: 'Editado', imageUrl: 'https://photos.google.com/share/example', imageData: 'image' } }, response);
+  assert.equal(data.news[0].images[0], 'https://photos.google.com/share/example');
+  const originalImage = 'https://www.tiktok.com/api/img/?itemId=7678401393496968469&location=0&aid=1988';
+  const googleLink = 'https://www.google.com/imgres?q=NOSSA&imgurl=' + encodeURIComponent(originalImage);
+  await routes.get('POST /admin/news')({ body: { id: 'old', title: 'Novo', text: 'Editado', imageUrl: googleLink, imageData: 'image' } }, response);
+  assert.equal(data.news[0].images[0], originalImage);
+  assert.equal(context.normalizeImageUrl('https://www.google.com/imgres?imgurl=javascript%3Aalert(1)'), '');
+  assert.equal(context.normalizeImageUrl('https://www.google.com/imgres?q=sem-foto'), '');
+  assert.equal(context.imageDisplayUrl(googleLink), originalImage);
+  context.saveUploadedImage = originalUpload;
   await routes.get('POST /admin/delete')({ body: { type: 'news', id: 'old' } }, response);
   assert.equal(data.news.length, 0);
   assert.ok(deleted.includes('https://example.com/new.jpg'));

@@ -74,6 +74,11 @@ function normalizeImageUrl(value = '') {
     const url = new URL(trimmed);
     if (!['http:', 'https:'].includes(url.protocol)) return '';
 
+    if (['google.com', 'www.google.com', 'google.com.br', 'www.google.com.br'].includes(url.hostname) && url.pathname === '/imgres') {
+      const original = new URL(url.searchParams.get('imgurl') || '');
+      return ['http:', 'https:'].includes(original.protocol) ? original.toString() : '';
+    }
+
     const driveMatch = url.pathname.match(/^\/file\/d\/([^/]+)/);
     if (url.hostname === 'drive.google.com' && driveMatch?.[1]) {
       return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(driveMatch[1])}`;
@@ -100,7 +105,8 @@ function isGoogleUrl(value = '') {
 }
 
 function imageDisplayUrl(value = '') {
-  return isGoogleUrl(value) ? `/image-proxy?url=${encodeURIComponent(value)}` : value;
+  const normalized = normalizeImageUrl(value) || value;
+  return isGoogleUrl(normalized) ? `/image-proxy?url=${encodeURIComponent(normalized)}` : normalized;
 }
 
 async function fetchGoogleImage(url, allowHtml = true) {
@@ -361,7 +367,9 @@ function renderAdmin(data, editing = null, warning = false) {
             </div>
             <input id="news-image-data" type="hidden" name="imageData">
             <details class="link-option">
-              <summary>Usar link de imagem</summary>
+              <summary>Usar link de imagem (Google ou outro site)</summary>
+              <p>Cole o endereço da imagem ou um link público de compartilhamento. Se preencher este campo, o link será usado no lugar do arquivo selecionado.</p>
+              <p>Links de resultados do Google Imagens são convertidos para o endereço original da foto. Se o site de origem bloquear a imagem, baixe a foto e use Escolher foto.</p>
               ${formField({ label: 'Link direto da foto', name: 'imageUrl', type: 'url', required: false })}
             </details>
             <p id="news-form-error" class="form-error" role="alert" hidden></p>
@@ -497,13 +505,14 @@ app.post('/admin/news', requireAuth, async (req, res) => {
   try {
     const data = await readData();
     const existing = req.body.id ? data.news.find(item => item.id === req.body.id) : null;
+    const previousImages = [...(existing?.images || [])];
     if (req.body.id && !existing) return res.sendStatus(404);
     const title = String(req.body.title || '').trim();
     const text = String(req.body.text || '').trim();
     if (!title || !text) throw new Error('Preencha o titulo e o texto da noticia.');
     const linkedImage = normalizeImageUrl(req.body.imageUrl);
     if (req.body.imageUrl && !linkedImage) throw new Error('Informe um link de imagem HTTP ou HTTPS valido.');
-    uploadedImage = await saveUploadedImage(req.body.imageData);
+    uploadedImage = linkedImage ? '' : await saveUploadedImage(req.body.imageData);
     const removed = [].concat(req.body.removeImages || []).map(String);
     const images = uploadedImage || linkedImage ? [uploadedImage || linkedImage] : (existing?.images || []).filter((url, index) => !removed.includes(String(index)));
     const item = { id: existing?.id || crypto.randomUUID(), title, text,
@@ -511,11 +520,16 @@ app.post('/admin/news', requireAuth, async (req, res) => {
     if (existing) await updateNews(item);
     else await addNews(item);
     saved = true;
-    const pending = await removeUnusedImages(existing?.images || []);
+    const pending = await removeUnusedImages(previousImages);
+    if (req.headers?.accept === 'application/json') return res.json({ redirect: pending ? '/admin?cleanup=pending' : '/admin' });
     res.redirect(pending ? '/admin?cleanup=pending' : '/admin');
   } catch (error) {
     if (uploadedImage && !saved) {
       try { await removeUnusedImages([uploadedImage]); } catch { console.error('Falha ao verificar imagem sem uso.'); }
+    }
+    if (req.headers?.accept === 'application/json') {
+      const message = /Cloudinary|^(Preencha|Informe|Formato|A imagem|Configure)/.test(error.message) ? error.message : 'Falha ao salvar no banco. Tente novamente.';
+      return res.status(400).json({ error: saved ? `Noticia salva. ${message}` : message });
     }
     res.status(400).send(layout({
       title: `Erro - ${SITE_NAME}`, admin: true,

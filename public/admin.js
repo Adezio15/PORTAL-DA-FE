@@ -53,10 +53,38 @@ fileInput?.addEventListener('change', () => {
 
 removeButton?.addEventListener('click', clearImage);
 
-newsForm?.addEventListener('submit', (event) => {
-  if (fileInput.files.length && !imageData.value) {
+newsForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!newsForm.elements.imageUrl.value.trim() && fileInput.files.length && !imageData.value) {
     event.preventDefault();
     formError.textContent = 'Aguarde a foto terminar de carregar e tente novamente.';
     formError.hidden = false;
+    return;
+  }
+  const button = newsForm.querySelector('button[type="submit"]');
+  if (button.disabled) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Salvando...';
+  formError.hidden = true;
+  try {
+    const response = await fetch(newsForm.action, {
+      method: 'POST', body: new URLSearchParams(new FormData(newsForm)),
+      headers: { Accept: 'application/json' }
+    });
+    if (response.redirected) {
+      formError.textContent = 'Sua sessao expirou. Entre no painel em outra aba e tente salvar novamente.';
+      formError.hidden = false;
+      return;
+    }
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Nao foi possivel salvar. Tente novamente.');
+    window.location.assign(result.redirect);
+  } catch (error) {
+    formError.textContent = error instanceof SyntaxError || error instanceof TypeError ? 'Falha de conexao. Seus dados foram mantidos; tente salvar novamente.' : error.message;
+    formError.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
   }
 });

@@ -6,13 +6,18 @@ import { saveUploadedImage, removeCloudinaryImage, managedPublicId } from '../cl
 test('upload assinado, URL publica e exclusao restrita a arquivos do portal', async () => {
   const previous = { ...process.env };
   const originalFetch = globalThis.fetch;
-  process.env.CLOUDINARY_CLOUD_NAME = 'test-cloud';
-  process.env.CLOUDINARY_API_KEY = 'test-key';
-  process.env.CLOUDINARY_API_SECRET = 'test-secret';
+  process.env.CLOUDINARY_CLOUD_NAME = ' test-cloud ';
+  process.env.CLOUDINARY_API_KEY = ' test-key ';
+  process.env.CLOUDINARY_API_SECRET = ' test-secret ';
   const calls = [];
   globalThis.fetch = async (url, options) => {
     calls.push(url);
     const body = options.body;
+    assert.ok(body instanceof FormData);
+    if (url.endsWith('/upload')) {
+      assert.equal(body.get('file').type, 'image/png');
+      assert.equal(await body.get('file').text(), 'hello');
+    }
     assert.equal(body.get('api_key'), 'test-key');
     assert.equal(body.has('api_secret'), false);
     const keys = [...body.keys()].filter(key => !['file', 'api_key', 'signature'].includes(key)).sort();
@@ -33,6 +38,18 @@ test('upload assinado, URL publica e exclusao restrita a arquivos do portal', as
     await assert.rejects(saveUploadedImage('data:image/png;base64,' + Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64')), /5 MB/);
     globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: { message: 'test-secret' } }) });
     await assert.rejects(saveUploadedImage('data:image/png;base64,aGVsbG8='), error => !error.message.includes('test-secret') && error.message.includes('Cloudinary'));
+    for (const [status, message, expected] of [
+      [401, 'Invalid Signature test-secret', /CLOUDINARY_API_SECRET/],
+      [400, 'Unknown cloud name', /CLOUDINARY_CLOUD_NAME/],
+      [429, 'Quota exceeded', /Limite/],
+      [400, 'Invalid image file', /outra foto/],
+      [503, 'Internal error', /temporariamente/]
+    ]) {
+      globalThis.fetch = async () => ({ ok: false, status, json: async () => ({ error: { message } }) });
+      await assert.rejects(saveUploadedImage('data:image/png;base64,aGVsbG8='), error => expected.test(error.message) && !error.message.includes('test-secret'));
+    }
+    globalThis.fetch = async () => { throw new DOMException('timeout', 'TimeoutError'); };
+    await assert.rejects(saveUploadedImage('data:image/png;base64,aGVsbG8='), /demorou/);
     delete process.env.CLOUDINARY_API_SECRET;
     assert.equal(await saveUploadedImage(''), '');
     await assert.rejects(saveUploadedImage('data:image/png;base64,aGVsbG8='), /Configure/);
