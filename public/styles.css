@@ -451,6 +451,13 @@ textarea {
   margin-top: 20px;
 }
 
+.comments { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+.comment { margin-bottom: 16px; padding: 12px; background: #f7f5f0; border-radius: 6px; }
+.comment time { display: block; font-size: .8rem; }
+.comment p, .comment-text, .news-card > p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.edit-photo { max-width: 100%; max-height: 280px; object-fit: contain; }
+input[type="checkbox"] { width: auto; }
+
 ul {
   display: grid;
   gap: 10px;

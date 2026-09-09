@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { saveUploadedImage, removeCloudinaryImage } from './cloudinary.js';
 import {
+  addComment,
+  deleteComment,
+  updatePhoto,
+  updateVideo,
   addNews,
   addPhoto,
   addVideo,
@@ -178,6 +182,22 @@ function layout({ title, body, admin = false }) {
 </html>`;
 }
 
+function renderComments(item, comments = []) {
+  const entries = comments.filter(comment => comment.news_id === item.id);
+  return `<section class="comments" id="comments-${escapeHtml(item.id)}">
+    <h4>Comentários (${entries.length})</h4>
+    ${entries.map(comment => `<article class="comment"><strong>${escapeHtml(comment.author)}</strong>
+      <time>${new Date(comment.date).toLocaleDateString('pt-BR')}</time>
+      <p>${escapeHtml(comment.text)}</p></article>`).join('') || '<p>Seja o primeiro a comentar.</p>'}
+    <form method="post" action="/news/${encodeURIComponent(item.id)}/comments">
+      <label>Seu nome<input name="author" required maxlength="80" autocomplete="name"></label>
+      <label>Comentário<textarea name="text" required maxlength="2000"></textarea></label>
+      <p>Seu nome e comentário ficarão visíveis para todos os leitores.</p>
+      <button class="primary-button" type="submit">Enviar comentário</button>
+    </form>
+  </section>`;
+}
+
 function renderHome(data) {
   const news = data.news
     .slice()
@@ -195,6 +215,7 @@ function renderHome(data) {
             `).join('')}
           </div>
         ` : ''}
+        ${renderComments(item, data.comments)}
       </article>
     `)
     .join('');
@@ -286,7 +307,7 @@ function renderAdmin(data, editing = null, warning = false) {
   const listItems = (items, type) => items.map((item) => `
     <li>
       <span>${escapeHtml(item.title)}</span>
-      ${type === 'news' ? `<a href="/admin?edit=${encodeURIComponent(item.id)}">Editar</a>` : ''}
+      <a href="/admin?type=${type}&edit=${encodeURIComponent(item.id)}">Editar</a>
       <form method="post" action="/admin/delete">
         <input type="hidden" name="type" value="${type}">
         <input type="hidden" name="id" value="${escapeHtml(item.id)}">
@@ -373,6 +394,14 @@ function renderAdmin(data, editing = null, warning = false) {
           <ul>${listItems(data.photos, 'photos')}</ul>
           <h3>Videos</h3>
           <ul>${listItems(data.videos, 'videos')}</ul>
+          <h3>Comentários dos leitores</h3>
+          <ul>${(data.comments || []).map(comment => `<li><div><strong>${escapeHtml(comment.author)}</strong>
+            <span>em ${escapeHtml(data.news.find(item => item.id === comment.news_id)?.title || '')}</span>
+            <p class="comment-text">${escapeHtml(comment.text)}</p></div>
+            <form method="post" action="/admin/comments/delete">
+              <input type="hidden" name="id" value="${escapeHtml(comment.id)}">
+              <button type="submit">Remover comentário</button>
+            </form></li>`).join('') || '<li>Nenhum comentário ainda.</li>'}</ul>
         </section>
       </main>
     `
@@ -429,6 +458,23 @@ app.get('/logout', (req, res) => {
 
 app.get('/admin', requireAuth, async (req, res) => {
   const data = await readData();
+  const type = req.query.type || 'news';
+  if (!['news', 'photos', 'videos'].includes(type)) return res.sendStatus(400);
+  if (req.query.edit && type !== 'news') {
+    const item = data[type].find(item => item.id === req.query.edit);
+    if (!item) return res.sendStatus(404);
+    return res.send(layout({ title: 'Editar publicação', admin: true, body: `<main class="admin-page">
+      <form class="panel" method="post" action="/admin/${type}/edit">
+        <h1>${type === 'photos' ? 'Editar foto' : 'Editar vídeo'}</h1>
+        <input type="hidden" name="id" value="${escapeHtml(item.id)}">
+        ${type === 'photos' ? `<img class="edit-photo" src="${escapeHtml(imageDisplayUrl(item.url))}" alt="Foto atual">` : ''}
+        ${formField({ label: 'Título', name: 'title', value: item.title })}
+        ${formField({ label: type === 'photos' ? 'Link da foto' : 'Link do vídeo', name: 'url', value: item.url })}
+        ${formField({ label: type === 'photos' ? 'Legenda' : 'Descrição', name: 'text', textarea: true, value: item.caption ?? item.description, required: false })}
+        <button class="primary-button" type="submit">Salvar alterações</button>
+        <a href="/admin">Cancelar edição</a>
+      </form></main>` }));
+  }
   const editing = req.query.edit ? data.news.find(item => item.id === req.query.edit) : null;
   if (req.query.edit && !editing) return res.sendStatus(404);
   res.send(renderAdmin(data, editing, req.query.cleanup === 'pending'));
@@ -498,6 +544,45 @@ app.post('/admin/videos', requireAuth, async (req, res) => {
   res.redirect('/admin');
 });
 
+for (const type of ['photos', 'videos']) {
+  app.post(`/admin/${type}/edit`, requireAuth, async (req, res, next) => {
+    try {
+      const data = await readData();
+      const existing = data[type].find(item => item.id === req.body.id);
+      if (!existing) return res.sendStatus(404);
+      const title = String(req.body.title || '').trim();
+      const source = String(req.body.url || '').trim();
+      const url = source === existing.url ? source : normalizeImageUrl(source);
+      if (!title || !url) return res.status(400).send('Preencha o título e um link de imagem ou vídeo válido.');
+      const text = String(req.body.text || '').trim();
+      if (type === 'photos') await updatePhoto({ id: existing.id, title, url, caption: text });
+      else await updateVideo({ id: existing.id, title, url: normalizeYouTubeUrl(url), description: text });
+      const pending = type === 'photos' ? await removeUnusedImages([existing.url]) : false;
+      res.redirect(pending ? '/admin?cleanup=pending' : '/admin');
+    } catch (error) { next(error); }
+  });
+}
+
+app.post('/news/:id/comments', async (req, res, next) => {
+  try {
+    const author = typeof req.body.author === 'string' ? req.body.author.trim() : '';
+    const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+    if (!author || author.length > 80 || !text || text.length > 2000) {
+      return res.status(400).send(layout({ title: 'Verifique seu comentário', body: `<main class="login-page"><section class="panel"><h1>Verifique seu comentário</h1><p>Informe seu nome (até 80 caracteres) e um comentário (até 2000 caracteres).</p><a href="/#comments-${escapeHtml(req.params.id)}">Voltar à publicação</a></section></main>` }));
+    }
+    const saved = await addComment({ id: crypto.randomUUID(), newsId: req.params.id, author, text });
+    if (!saved) return res.sendStatus(404);
+    res.redirect(303, `/#comments-${encodeURIComponent(req.params.id)}`);
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/comments/delete', requireAuth, async (req, res, next) => {
+  try {
+    await deleteComment(String(req.body.id || ''));
+    res.redirect('/admin');
+  } catch (error) { next(error); }
+});
+
 app.post('/admin/delete', requireAuth, async (req, res) => {
   const data = await readData();
   const type = req.body.type;
@@ -508,6 +593,10 @@ app.post('/admin/delete', requireAuth, async (req, res) => {
     if (await removeUnusedImages(images || [])) return res.redirect('/admin?cleanup=pending');
   }
   res.redirect('/admin');
+});
+
+app.use((error, req, res, next) => {
+  res.status(500).send('Não foi possível concluir a operação. Tente novamente.');
 });
 
 function safeDatabaseErrorMessage(error) {

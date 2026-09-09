@@ -41,12 +41,13 @@ export async function initializeDatabase() {
 
 export async function readData() {
   const db = database();
-  const [infoRows, newsRows, imageRows, photos, videos] = await db.transaction([
+  const [infoRows, newsRows, imageRows, photos, videos, comments] = await db.transaction([
     db`SELECT title, subtitle, about, prayer FROM site_info WHERE id = 1`,
     db`SELECT id, title, category, body AS text, published_at AS date FROM news ORDER BY published_at DESC`,
     db`SELECT news_id, url FROM news_images ORDER BY position`,
     db`SELECT id, title, url, caption FROM photos ORDER BY created_at`,
-    db`SELECT id, title, url, description FROM videos ORDER BY created_at`
+    db`SELECT id, title, url, description FROM videos ORDER BY created_at`,
+    db`SELECT id, news_id, author, body AS text, created_at AS date FROM comments ORDER BY created_at`
   ], { readOnly: true });
 
   const imagesByNews = new Map();
@@ -60,7 +61,8 @@ export async function readData() {
     info: infoRows[0],
     news: newsRows.map((item) => ({ ...item, images: imagesByNews.get(item.id) || [] })),
     photos,
-    videos
+    videos,
+    comments
   };
 }
 
@@ -124,4 +126,27 @@ export async function updateNews(item) {
     db`DELETE FROM news_images WHERE news_id = ${item.id}`,
     ...item.images.map((url, position) => db`INSERT INTO news_images (news_id, url, position) VALUES (${item.id}, ${url}, ${position})`)
   ]);
+}
+
+export async function updatePhoto(item) {
+  const db = database();
+  await db`UPDATE photos SET title = ${item.title}, url = ${item.url}, caption = ${item.caption} WHERE id = ${item.id}`;
+}
+
+export async function updateVideo(item) {
+  const db = database();
+  await db`UPDATE videos SET title = ${item.title}, url = ${item.url}, description = ${item.description} WHERE id = ${item.id}`;
+}
+
+export async function addComment(item) {
+  const db = database();
+  const rows = await db`INSERT INTO comments (id, news_id, author, body)
+    SELECT ${item.id}, id, ${item.author}, ${item.text} FROM news WHERE id = ${item.newsId}
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+export async function deleteComment(id) {
+  const db = database();
+  await db`DELETE FROM comments WHERE id = ${id}`;
 }

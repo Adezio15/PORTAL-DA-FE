@@ -61,3 +61,9 @@ Links externos e caminhos `/uploads/...` existentes continuam sendo exibidos e s
 Nunca inclua credenciais no codigo ou no Git. Configure-as no ambiente do Render ou no `.env` local.
 
 Testes locais (sem credenciais reais): `node --test`.
+
+Em **Conteudos publicados**, use **Editar** nas fotos e videos para alterar titulo, link e legenda ou descricao. Nas noticias, o painel permite editar texto, categoria e fotos, inclusive enviando uma nova imagem.
+
+Cada noticia possui uma area de comentarios aberta aos leitores, com nome (ate 80 caracteres) e mensagem (ate 2000 caracteres). Os comentarios aparecem publicamente apos o envio. O administrador pode remove-los em **Comentarios dos leitores** no painel. Ao excluir uma noticia, seus comentarios sao excluidos automaticamente pelo banco.
+
+A tabela `comments` e criada automaticamente na proxima inicializacao do servidor, inclusive em bancos ja existentes. Reinicie a aplicacao apos atualizar o codigo.

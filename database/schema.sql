@@ -40,3 +40,12 @@ CREATE TABLE IF NOT EXISTS videos (
 );
 
 CREATE INDEX IF NOT EXISTS news_published_at_idx ON news (published_at DESC);
+
+CREATE TABLE IF NOT EXISTS comments (
+  id TEXT PRIMARY KEY,
+  news_id TEXT NOT NULL REFERENCES news(id) ON DELETE CASCADE,
+  author TEXT NOT NULL CHECK (char_length(author) BETWEEN 1 AND 80),
+  body TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS comments_news_idx ON comments (news_id, created_at);
