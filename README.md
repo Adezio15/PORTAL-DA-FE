@@ -31,7 +31,7 @@ No Render, configure as variaveis de ambiente:
 - `CLOUDINARY_API_KEY`: chave da API do Cloudinary
 - `CLOUDINARY_API_SECRET`: segredo da API, somente no servidor
 
-Ao criar uma noticia, escreva o texto e escolha uma foto JPG, PNG, WEBP ou GIF do celular ou computador (ate 5 MB). Tambem e possivel usar um link publico de imagem como alternativa.
+Ao criar ou editar uma noticia, escolha uma foto JPG, PNG, WEBP, GIF, AVIF ou BMP do celular ou computador (ate 5 MB). Novos arquivos sao salvos no Neon, sem depender do Cloudinary. Tambem e possivel usar um link publico de imagem como alternativa.
 
 ## Deploy no Render
 
@@ -40,7 +40,7 @@ Ao criar uma noticia, escreva o texto e escolha uma foto JPG, PNG, WEBP ou GIF d
 3. Use:
    - Build Command: `npm install`
    - Start Command: `npm start`
-4. Configure as variaveis listadas acima, incluindo as tres do Cloudinary. Mantenha a mesma `DATABASE_URL` do Neon.
+4. Configure as variaveis de banco e login. Mantenha a mesma `DATABASE_URL` do Neon. As variaveis do Cloudinary sao opcionais, utilizadas apenas para limpar imagens antigas desse servico.
 
 ## Banco de dados Neon
 
@@ -48,7 +48,7 @@ Na primeira inicializacao, o servidor cria automaticamente as tabelas definidas 
 
 No desenvolvimento local, carregue o `.env` com `node --env-file=.env server.js` ou exporte as variaveis no terminal. O arquivo `.env` esta ignorado pelo Git e nunca deve ser enviado ao repositorio.
 
-Os novos uploads do painel sao enviados em memoria para o Cloudinary (JPG, PNG, WEBP ou GIF, ate 5 MB). Apenas a URL HTTPS retornada e gravada em `news_images.url` no Neon. Nenhum novo upload e salvo no disco do Render. Sem configuracao do Cloudinary, uploads exibem erro; noticias antigas e edicoes somente de texto continuam funcionando.
+Os novos uploads ficam na tabela `uploaded_images` do Neon, com tipo da imagem e conteudo em base64. A rota `/media/:id` serve os bytes e `news_images.url` guarda essa URL. A tabela e criada automaticamente ao reiniciar o servidor atualizado. Nenhum arquivo novo depende do disco do Render ou das chaves do Cloudinary. O armazenamento das imagens consome a cota do banco (base64 ocupa aproximadamente 33% a mais que o arquivo original).
 
 Em **Conteudos publicados → Noticias → Editar**, altere titulo, categoria e texto. Uma nova foto ou link substitui as fotos atuais. Sem uma nova foto, as imagens atuais sao preservadas, exceto as marcadas para remocao. A data original e mantida.
 
@@ -56,7 +56,7 @@ Ao remover/substituir imagens ou excluir noticias, o sistema salva primeiro no N
 
 ### Fotos anteriores ao Cloudinary
 
-Links externos e caminhos `/uploads/...` existentes continuam sendo exibidos e sao mantidos ao editar somente o texto. Isso nao torna persistente o disco antigo: **antes de um novo deploy**, copie os arquivos ainda existentes em `public/uploads` do Render. Envie cada foto antiga novamente pela edicao da respectiva noticia para obter uma URL Cloudinary; confira a imagem no site antes de descartar o backup. Fotos ja perdidas no disco temporario precisam ser reenviadas a partir do original. Nao ha migracao automatica nem exclusao dos arquivos locais antigos.
+Links externos e caminhos `/uploads/...` existentes continuam sendo exibidos e sao mantidos ao editar somente o texto. Isso nao torna persistente o disco antigo: antes de um novo deploy, copie os arquivos ainda existentes em `public/uploads` do Render. Reenvie as fotos pela edicao da noticia para salva-las no Neon. Fotos ja perdidas no disco temporario precisam ser reenviadas a partir do original. Nao ha migracao automatica nem exclusao dos arquivos locais antigos.
 
 Nunca inclua credenciais no codigo ou no Git. Configure-as no ambiente do Render ou no `.env` local.
 

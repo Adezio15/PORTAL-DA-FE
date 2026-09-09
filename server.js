@@ -2,9 +2,13 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { saveUploadedImage, removeCloudinaryImage } from './cloudinary.js';
+import { removeCloudinaryImage } from './cloudinary.js';
+import { saveUploadedImage } from './images.js';
 import {
   addComment,
+  storeImage,
+  readImage,
+  deleteImage,
   deleteComment,
   updatePhoto,
   updateVideo,
@@ -37,7 +41,10 @@ async function removeUnusedImages(images = []) {
   let failed = false;
   for (const url of new Set(images)) {
     if (used.has(url)) continue;
-    try { await removeCloudinaryImage(url); }
+    try {
+      if (url?.startsWith('/media/')) await deleteImage(url.slice('/media/'.length));
+      else await removeCloudinaryImage(url);
+    }
     catch { failed = true; console.error('Falha ao limpar imagem no Cloudinary; verificar arquivos sem uso na pasta portal-da-fe/news.'); }
   }
   return failed;
@@ -357,7 +364,7 @@ function renderAdmin(data, editing = null, warning = false) {
             ${editing ? '<p class="form-intro">Uma nova foto substitui as fotos atuais. Sem selecionar uma nova foto, as fotos desmarcadas serao mantidas.</p>' : ''}
             <label class="photo-picker">
               Foto da noticia <span class="optional">(opcional, ate 5 MB)</span>
-              <input id="news-image-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+              <input id="news-image-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp">
               <span class="file-button">Escolher foto</span>
               <span id="news-image-name" class="file-name">Nenhuma foto escolhida</span>
             </label>
@@ -419,6 +426,17 @@ function renderAdmin(data, editing = null, warning = false) {
 app.get('/', async (req, res) => {
   const data = await readData();
   res.send(renderHome(data));
+});
+
+app.get('/media/:id', async (req, res, next) => {
+  try {
+    if (!/^[a-f0-9-]{36}$/.test(req.params.id)) return res.sendStatus(404);
+    const image = await readImage(req.params.id);
+    if (!image) return res.sendStatus(404);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.type(image.mime).send(Buffer.from(image.base64, 'base64'));
+  } catch (error) { next(error); }
 });
 
 app.get('/image-proxy', async (req, res) => {
@@ -512,7 +530,7 @@ app.post('/admin/news', requireAuth, async (req, res) => {
     if (!title || !text) throw new Error('Preencha o titulo e o texto da noticia.');
     const linkedImage = normalizeImageUrl(req.body.imageUrl);
     if (req.body.imageUrl && !linkedImage) throw new Error('Informe um link de imagem HTTP ou HTTPS valido.');
-    uploadedImage = linkedImage ? '' : await saveUploadedImage(req.body.imageData);
+    uploadedImage = linkedImage ? '' : await saveUploadedImage(req.body.imageData, storeImage);
     const removed = [].concat(req.body.removeImages || []).map(String);
     const images = uploadedImage || linkedImage ? [uploadedImage || linkedImage] : (existing?.images || []).filter((url, index) => !removed.includes(String(index)));
     const item = { id: existing?.id || crypto.randomUUID(), title, text,

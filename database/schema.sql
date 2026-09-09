@@ -49,3 +49,10 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS comments_news_idx ON comments (news_id, created_at);
+
+CREATE TABLE IF NOT EXISTS uploaded_images (
+  id TEXT PRIMARY KEY,
+  mime_type TEXT NOT NULL,
+  data_base64 TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

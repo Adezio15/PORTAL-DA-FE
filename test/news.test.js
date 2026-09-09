@@ -14,6 +14,8 @@ test('painel edita texto, preserva imagens antigas, substitui e exclui depois de
   const deleted = [];
   const context = { express, crypto, path, fileURLToPath, process, console, Buffer, URL,
     readData: async () => data,
+    storeImage: async () => {},
+    readImage: async id => id === '00000000-0000-0000-0000-000000000001' ? { mime: 'image/png', base64: 'aGVsbG8=' } : undefined,
     updatePhoto: async item => Object.assign(data.photos.find(p => p.id === item.id), item),
     updateVideo: async item => Object.assign(data.videos.find(p => p.id === item.id), item),
     addComment: async item => {
@@ -35,6 +37,12 @@ test('painel edita texto, preserva imagens antigas, substitui e exclui depois de
   vm.runInNewContext(source, context);
   const response = { redirect(statusOrUrl, url) { this.location = url || statusOrUrl; }, send(value) { this.html = value; }, sendStatus(value) { this.statusCode = value; }, status(value) { this.statusCode = value; return this; } };
   const next = error => { throw error; };
+  const mediaResponse = { ...response, set() {}, type(mime) { this.mime = mime; return this; } };
+  await routes.get('GET /media/:id')({ params: { id: '00000000-0000-0000-0000-000000000001' } }, mediaResponse, next);
+  assert.equal(mediaResponse.mime, 'image/png');
+  assert.equal(mediaResponse.html.toString(), 'hello');
+  await routes.get('GET /media/:id')({ params: { id: 'missing' } }, mediaResponse, next);
+  assert.equal(mediaResponse.statusCode, 404);
   await routes.get('GET /admin')({ query: { type: 'photos', edit: 'photo' } }, response);
   assert.match(response.html, /Editar foto/);
   await routes.get('POST /admin/photos/edit')({ body: { id: 'photo', title: 'Nova foto', url: 'https://example.com/other.jpg', text: 'Depois' } }, response, next);

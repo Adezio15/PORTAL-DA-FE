@@ -150,3 +150,22 @@ export async function deleteComment(id) {
   const db = database();
   await db`DELETE FROM comments WHERE id = ${id}`;
 }
+
+export async function storeImage(item) {
+  const db = database();
+  await db`INSERT INTO uploaded_images (id, mime_type, data_base64) VALUES (${item.id}, ${item.mime}, ${item.base64})`;
+}
+
+export async function readImage(id) {
+  const db = database();
+  const rows = await db`SELECT mime_type AS mime, data_base64 AS base64 FROM uploaded_images WHERE id = ${id}`;
+  return rows[0];
+}
+
+export async function deleteImage(id) {
+  const db = database();
+  const url = `/media/${id}`;
+  await db`DELETE FROM uploaded_images WHERE id = ${id}
+    AND NOT EXISTS (SELECT 1 FROM news_images WHERE url = ${url})
+    AND NOT EXISTS (SELECT 1 FROM photos WHERE url = ${url})`;
+}

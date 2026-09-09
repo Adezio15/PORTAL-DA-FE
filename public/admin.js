@@ -23,10 +23,10 @@ fileInput?.addEventListener('change', () => {
   const file = fileInput.files[0];
   if (!file) return clearImage();
 
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/bmp'];
   if (!allowedTypes.includes(file.type) || file.size > 5 * 1024 * 1024) {
     clearImage();
-    formError.textContent = 'Escolha uma imagem JPG, PNG, WEBP ou GIF com no maximo 5 MB.';
+    formError.textContent = 'Escolha uma imagem JPG, PNG, WEBP, GIF, AVIF ou BMP com no maximo 5 MB.';
     formError.hidden = false;
     return;
   }
